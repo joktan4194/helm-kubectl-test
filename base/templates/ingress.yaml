@@ -1,0 +1,67 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "base.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.service.host | quote }}
+    kubernetes.io/ingress.class: {{ .Values.service.ingress | quote }}
+    ingress.kubernetes.io/whitelist-x-forwarded-for: "true"
+    {{- if .Values.alb.conditionals }}
+    alb.ingress.kubernetes.io/conditions.{{ $fullName }}: {{ .Values.alb.conditions | squote }}
+    {{- end }}
+    
+    # alb.ingress.kubernetes.io/actions.rule-path1: >
+    #   {"type":"forward","forwardConfig":{"targetGroups":[{"serviceName":"svc-a-service","servicePort":80,"weight":100}]}}
+    # alb.ingress.kubernetes.io/conditions.rule-path1: >
+    #   [{"field":"host-header","hostHeaderConfig":{"values":["anno.example.com"]}}]
+    {{- if .Values.alb.enabled }}
+    {{- if .Values.alb.single }}
+    alb.ingress.kubernetes.io/group.name: {{ .Values.alb.name | quote }}
+    {{- end }}
+    alb.ingress.kubernetes.io/scheme: {{ .Values.alb.scheme | quote }}
+    # alb.ingress.kubernetes.io/wafv2-acl-arn: {{ .Values.alb.waf | quote }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.service.acm | quote }}
+    alb.ingress.kubernetes.io/success-codes: {{ .Values.alb.success | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.alb.healthcheck | quote }}
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    {{- if .Values.alb.sg }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.alb.sg | quote }}
+    {{- end }}
+    {{ if .Values.alb.grpc }}
+    alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    {{ else }}
+    alb.ingress.kubernetes.io/backend-protocol-version: HTTP1
+    {{ end }}
+    alb.ingress.kubernetes.io/target-type: instance
+    alb.ingress.kubernetes.io/ip-address-type: ipv4
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig": { "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
+    {{- else -}}
+    kubernetes.io/ingress.class: {{ .Values.ingress.class | quote }}
+    {{- end }}
+spec:
+  rules:
+    - host: {{ .Values.service.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ssl-redirect
+                port:
+                  name: use-annotation
+          - path: {{ .Values.ingress.path | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+{{- end }}

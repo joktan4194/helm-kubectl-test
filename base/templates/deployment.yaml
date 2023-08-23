@@ -1,0 +1,275 @@
+{{- $fullName := include "base.fullname" . -}}
+{{- if .Values.deployment.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  minReadySeconds: {{ .Values.minReadySeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "base.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- if .Values.podAnnotations }}
+      annotations:
+        {{- range $key, $value := .Values.podAnnotations }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      {{- end }}
+      labels:
+        type: {{ .Values.labels.type }}
+        env: {{ .Values.labels.env }}
+        {{- include "base.selectorLabels" . | nindent 8 }}
+{{- if .Values.podAnnotations }}
+{{ toYaml .Values.podAnnotations | indent 8 }}
+{{- end }}
+    spec:
+      imagePullSecrets:
+      - name: {{ .Values.imageSecretName }}
+      {{ if .Values.eks_iam.existing.enabled }}
+      serviceAccountName: {{ .Values.eks_iam.existing.name }}
+      {{ else }}
+      serviceAccountName: {{ include "base.serviceAccountName" . }}
+      {{ end }}
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            capabilities:
+              add: ["SYS_PTRACE"]
+          {{- if eq .Values.type "php" }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/bash", "-c", "supervisorctl stop all"]
+          {{- else if eq .Values.type "dotnet" }}
+          lifecycle:
+            preStop:
+              exec:
+                command: [ "/bin/sleep", "20" ]
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- if .Values.service.second_port.enabled }}
+            - name: shttp
+              containerPort: {{ .Values.service.second_port.port }}
+              protocol: TCP
+          {{- end }}
+          {{- if .Values.service.third_port.enabled }}
+            - name: thttp
+              containerPort: {{ .Values.service.third_port.port }}
+              protocol: TCP
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            {{ if .Values.probes.liveness.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            {{ if .Values.probes.readiness.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+          {{- end }}
+          {{- if .Values.probes.startup.enabled }}
+          startupProbe:
+            {{ if .Values.probes.startup.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            {{- if eq .Values.tomcat "prod" }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            {{- else if eq .Values.tomcat "dev" }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: "dev"
+            {{- end -}}
+            {{- range $key, $value := .Values.config }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.secret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullName }}
+                  key: {{ $key }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.rabbitmq.cert.enabled }}
+            - name: rabbitmq-cert
+              mountPath: /rabbitmq/ssl
+            {{- end }}
+            - mountPath: /config
+              name: config
+      #joktan
+        {{- if .Values.sideCarImage }}
+        - name: {{ .Values.sideCarImage.Name }}
+          image: "{{ .Values.sideCarImage.repository }}:{{ .Values.sideCarImage.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            capabilities:
+              add: ["SYS_PTRACE"]
+          {{- if eq .Values.type "php" }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/bash", "-c", "supervisorctl stop all"]
+          {{- else if eq .Values.type "dotnet" }}
+          lifecycle:
+            preStop:
+              exec:
+                command: [ "/bin/sleep", "20" ]
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.sideCarImage.service.port }}
+              protocol: TCP
+          {{- if .Values.sideCarImage.service.second_port.enabled }}
+            - name: shttp
+              containerPort: {{ .Values.sideCarImage.service.second_port.port }}
+              protocol: TCP
+          {{- end }}
+          {{- if .Values.sideCarImage.service.third_port.enabled }}
+            - name: thttp
+              containerPort: {{ .Values.sideCarImage.service.third_port.port }}
+              protocol: TCP
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            {{ if .Values.probes.liveness.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            {{ if .Values.probes.readiness.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+          {{- end }}
+          {{- if .Values.probes.startup.enabled }}
+          startupProbe:
+            {{ if .Values.probes.startup.grpc }}
+            tcpSocket:
+            {{ else }}
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+            {{ end }}
+              port: {{ .Values.service.port }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            {{- if eq .Values.tomcat "prod" }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            {{- else if eq .Values.tomcat "dev" }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: "dev"
+            {{- end -}}
+            {{- range $key, $value := .Values.config }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.secret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullName }}
+                  key: {{ $key }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.rabbitmq.cert.enabled }}
+            - name: rabbitmq-cert
+              mountPath: /rabbitmq/ssl
+            {{- end }}
+            - mountPath: /config
+              name: config
+        {{- end }}  
+      #joktan
+      {{- if .Values.eks_iam.enabled }}
+      securityContext:
+        fsGroup: 65534
+      {{- end }}
+      volumes:
+        {{- if .Values.rabbitmq.cert.enabled }}
+        - name: rabbitmq-cert
+          secret:
+            defaultMode: 420
+            secretName: {{ include "base.fullname" . }}-rabbitmq-cert
+        {{- end }}
+        - name: config
+          emptyDir: {}
+        {{- range .Values.hostMounts }}
+        - name: {{ .name }}
+          hostPath:
+            path: {{.hostPath}}
+            {{- if .type }}
+            type: {{ .type }}
+            {{- end }}
+        {{- end }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+      tolerations:
+{{ toYaml .Values.tolerations | indent 8 }}
+      {{- with .Values.affinity }}
+      affinity:
+          {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.extraVolumes }}
+{{ toYaml .Values.extraVolumes | indent 8 }}
+{{- end }}
+{{- end }}

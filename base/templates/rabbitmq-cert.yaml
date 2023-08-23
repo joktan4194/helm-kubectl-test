@@ -1,0 +1,9 @@
+{{- if .Values.rabbitmq.cert.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "base.fullname" . }}-rabbitmq-cert
+type: Opaque
+data:
+  rabbitmq-client-keystore.jks: {{ .Values.rabbitmq.cert.keystore | quote }}
+{{- end }}

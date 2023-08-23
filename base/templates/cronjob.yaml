@@ -1,0 +1,45 @@
+{{- $fullName := include "base.fullname" . -}}
+{{- if .Values.cronjob.enabled }}
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ include "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+spec:
+  concurrencyPolicy: Forbid
+  schedule: {{ .Values.schedule  | quote}}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+      backoffLimit: 4
+      template:
+        spec:
+          imagePullSecrets:
+          - name: {{ .Values.imageSecretName }}
+          serviceAccountName: {{ include "base.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          containers:
+            - name: {{ .Chart.Name }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              env:
+                {{- range $key, $value := .Values.config }}
+                - name: {{ $key }}
+                  value: {{ $value | quote }}
+                {{- end }}
+                {{- range $key, $value := .Values.secret }}
+                - name: {{ $key }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $fullName }}
+                      key: {{ $key }}
+                {{- end }}
+          nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 12 }}
+          tolerations:
+{{ toYaml .Values.tolerations | indent 12 }}
+          {{- with .Values.affinity }}
+          affinity:
+              {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end}}
